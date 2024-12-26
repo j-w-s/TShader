@@ -1,0 +1,4 @@
+displayName = TShade
+author = juice
+version = 1.0
+side = Client

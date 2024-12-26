@@ -1,0 +1,331 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using ReLogic.Content;
+using Terraria;
+using Terraria.ID;
+using Terraria.GameContent.Drawing;
+using Terraria.Graphics.Effects;
+using Terraria.Graphics.Light;
+using Terraria.ModLoader;
+using Terraria.ModLoader.Config;
+
+namespace test 
+{
+    public class test : Mod 
+    {
+        // Original variables maintained as requested
+        public static bool useLight = true;
+        public static bool useBloom = true;
+        public static float LightIntensity = 1f;
+        public static float ShadowIntensity = 1f;
+        public static float bloomIntensity = 1f;
+        public static float MoonLightIntensity;
+        public static bool fasttime = false;
+        public RenderTarget2D screen;
+        public RenderTarget2D light;
+        public RenderTarget2D bloom;
+        public RenderTarget2D cloud;
+        public static Effect Light;
+        public static Effect Shadow;
+        public static Effect Bloom;
+        public static int quality = 1;
+
+        // Cached values to reduce calculations
+        private readonly Vector2 oneThird = new Vector2(1f/3f);
+        private readonly Dictionary<int, float> moonPhaseIntensities = new Dictionary<int, float> {
+            {0, 1.01f}, {3, 0.9f}, {4, 0.6f}, {5, 0.9f}
+        };
+        
+        private GraphicsDevice graphicsDevice;
+        private SpriteBatch spriteBatch;
+        
+        public override void Load()
+        {
+            if (Main.dedServ) return;
+            
+            LoadEffects();
+            RegisterHooks();
+        }
+
+        private void LoadEffects()
+        {
+            const AssetRequestMode mode = (AssetRequestMode)2;
+            Light = ModContent.Request<Effect>("test/Effects/Light", mode).Value;
+            Shadow = ModContent.Request<Effect>("test/Effects/Shadow", mode).Value;
+            Bloom = ModContent.Request<Effect>("test/Effects/Bloom1", mode).Value;
+        }
+
+        private void RegisterHooks()
+        {
+            On.Terraria.Graphics.Effects.FilterManager.EndCapture += FilterManager_EndCapture;
+            On.Terraria.Main.LoadWorlds += Main_LoadWorlds;
+            Main.OnResolutionChanged += Main_OnResolutionChanged;
+        }
+
+        public override void PostSetupContent()
+        {
+            if (!Main.dedServ)
+            {
+                LoadEffects();
+            }
+        }
+
+        public override void Unload()
+        {
+            UnregisterHooks();
+            CleanupResources();
+        }
+
+        private void UnregisterHooks()
+        {
+            On.Terraria.Graphics.Effects.FilterManager.EndCapture -= FilterManager_EndCapture;
+            On.Terraria.Main.LoadWorlds -= Main_LoadWorlds;
+        }
+
+        private void CleanupResources()
+        {
+            Light = null;
+            Shadow = null;
+            Bloom = null;
+            screen?.Dispose();
+            light?.Dispose();
+            bloom?.Dispose();
+            cloud?.Dispose();
+            screen = null;
+            light = null;
+            bloom = null;
+            cloud = null;
+        }
+
+        private void InitializeRenderTargets()
+        {
+            graphicsDevice = Main.instance.GraphicsDevice;
+            var pp = graphicsDevice.PresentationParameters;
+            
+            CreateRenderTargets(
+                pp.BackBufferWidth,
+                pp.BackBufferHeight,
+                pp.BackBufferFormat
+            );
+        }
+
+        private void CreateRenderTargets(int width, int height, SurfaceFormat format)
+        {
+            int smallWidth = width / 3;
+            int smallHeight = height / 3;
+
+            screen = new RenderTarget2D(graphicsDevice, smallWidth, smallHeight, false, format, DepthFormat.None);
+            light = new RenderTarget2D(graphicsDevice, width, height, false, format, DepthFormat.None);
+            bloom = new RenderTarget2D(graphicsDevice, smallWidth, smallHeight, false, format, DepthFormat.None);
+            cloud = new RenderTarget2D(graphicsDevice, smallWidth, smallHeight, false, format, DepthFormat.None);
+        }
+
+        private void Main_LoadWorlds(On.Terraria.Main.orig_LoadWorlds orig)
+        {
+            orig();
+            if (screen == null)
+            {
+                InitializeRenderTargets();
+            }
+        }
+
+        private void Main_OnResolutionChanged(Vector2 obj)
+        {
+            CreateRenderTargets(Main.screenWidth, Main.screenHeight, Main.instance.GraphicsDevice.PresentationParameters.BackBufferFormat);
+        }
+
+        private void FilterManager_EndCapture(On.Terraria.Graphics.Effects.FilterManager.orig_EndCapture orig, FilterManager self, RenderTarget2D finalTexture, RenderTarget2D screenTarget1, RenderTarget2D screenTarget2, Color clearColor)
+        {
+            if (Main.myPlayer < 0)
+            {
+                orig(self, finalTexture, screenTarget1, screenTarget2, clearColor);
+                return;
+            }
+
+            graphicsDevice = Main.instance.GraphicsDevice;
+            spriteBatch = Main.spriteBatch;
+
+            if (screen == null)
+            {
+                InitializeRenderTargets();
+            }
+
+            if (useBloom)
+            {
+                UseBloom();
+            }
+            if (useLight)
+            {
+                UseLightAndShadow();
+            }
+
+            orig(self, finalTexture, screenTarget1, screenTarget2, clearColor);
+        }
+
+        private void UseBloom()
+        {
+            ApplyBloomPrePass();
+            ApplyBloomPasses();
+            CombineBloomWithScene();
+        }
+
+        private void ApplyBloomPrePass()
+        {
+            graphicsDevice.SetRenderTarget(Main.screenTargetSwap);
+            graphicsDevice.Clear(Color.Transparent);
+            
+            spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend);
+            spriteBatch.Draw(Main.screenTarget, Vector2.Zero, Color.White);
+            spriteBatch.End();
+            
+            graphicsDevice.SetRenderTarget(screen);
+            graphicsDevice.Clear(Color.Transparent);
+            
+            spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend);
+            Bloom.CurrentTechnique.Passes[0].Apply();
+            Bloom.Parameters["m"].SetValue(0.68f - bloomIntensity * 0.02f);
+            spriteBatch.Draw(Main.screenTarget, Vector2.Zero, null, Color.White, 0f, Vector2.Zero, 0.333f, SpriteEffects.None, 0f);
+            spriteBatch.End();
+        }
+
+        private void ApplyBloomPasses()
+        {
+            spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend);
+            Bloom.Parameters["uScreenResolution"].SetValue(new Vector2(Main.screenWidth / 3f, Main.screenHeight / 3f));
+            Bloom.Parameters["uRange"].SetValue(1f);
+            Bloom.Parameters["uIntensity"].SetValue(1.02f);
+
+            for (int i = 0; i < 4; i++)
+            {
+                ApplyBloomPass();
+            }
+            spriteBatch.End();
+        }
+
+        private void ApplyBloomPass()
+        {
+            Bloom.CurrentTechnique.Passes["GlurV"].Apply();
+            
+            graphicsDevice.SetRenderTarget(bloom);
+            graphicsDevice.Clear(Color.Transparent);
+            spriteBatch.Draw(screen, Vector2.Zero, null, Color.White, 0f, Vector2.Zero, 1f, SpriteEffects.None, 0f);
+            
+            Bloom.CurrentTechnique.Passes["GlurV"].Apply();
+            graphicsDevice.SetRenderTarget(screen);
+            graphicsDevice.Clear(Color.Transparent);
+            spriteBatch.Draw(bloom, Vector2.Zero, null, Color.White, 0f, Vector2.Zero, 1f, SpriteEffects.None, 0f);
+        }
+
+        private void CombineBloomWithScene()
+        {
+            graphicsDevice.SetRenderTarget(Main.screenTarget);
+            graphicsDevice.Clear(Color.Transparent);
+            
+            spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Additive);
+            Bloom.CurrentTechnique.Passes["Blend"].Apply();
+            Bloom.Parameters["tex0"].SetValue(Main.screenTargetSwap);
+            Bloom.Parameters["p"].SetValue(3);
+            Bloom.Parameters["m2"].SetValue(1.5f * bloomIntensity);
+            spriteBatch.Draw(screen, Vector2.Zero, null, Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 0f);
+            spriteBatch.End();
+        }
+
+        public static void SetQuality(int q)
+        {
+            if (quality != q)
+            {
+                quality = q;
+            }
+        }
+
+        private float Gauss(float x, float sigma)
+        {
+            const float coefficient = 0.39894f;
+            return coefficient * (float)Math.Exp(-0.5f * x * x / (0.2f * sigma));
+        }
+
+        private void UseLightAndShadow()
+        {
+            PrepareBaseScene();
+            ApplyLightPass();
+            ApplyShadowPass();
+            CombineFinalScene();
+        }
+
+        private void PrepareBaseScene()
+        {
+            graphicsDevice.SetRenderTarget(Main.screenTargetSwap);
+            graphicsDevice.Clear(Color.Transparent);
+            
+            spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend);
+            spriteBatch.Draw(Main.screenTarget, Vector2.Zero, Color.White);
+            spriteBatch.End();
+        }
+
+        private float CalculateLightIntensity()
+        {
+            Color skyColor = Main.ColorOfTheSkies;
+            float baseIntensity = 1f - 1.2f * ((skyColor.R * 0.3f + skyColor.G * 0.6f + skyColor.B * 0.1f) / 255f);
+            float finalIntensity = 1.1f * LightIntensity;
+
+            if (Main.LocalPlayer.ZoneSnow && !Main.LocalPlayer.ZoneCrimson && !Main.LocalPlayer.ZoneCorrupt)
+            {
+                baseIntensity -= Main.bgAlphaFrontLayer[7] * 0.1f;
+            }
+            if (Main.LocalPlayer.ZoneCrimson)
+            {
+                baseIntensity += 0.2f;
+            }
+
+            int snowBG = Main.snowBG[0];
+            if (snowBG == 263 || snowBG == 258 || snowBG == 267)
+            {
+                baseIntensity -= Main.bgAlphaFrontLayer[7];
+            }
+            if (Main.desertBG[0] == 248)
+            {
+                baseIntensity -= Main.bgAlphaFrontLayer[2] * 0.6f;
+            }
+
+            return finalIntensity * (0.75f + baseIntensity * 0.2f);
+        }
+
+        private float GetMoonlightIntensity()
+        {
+            return moonPhaseIntensities.TryGetValue(Main.moonPhase, out float intensity) ? intensity : 1f;
+        }
+
+        private Vector2 GetSunPos()
+        {
+            float bgTop = (float)(-Main.screenPosition.Y / (Main.worldSurface * 16.0 - 600.0) * 200.0);
+            float height = bgTop + 180f;
+            
+            if (Main.dayTime)
+            {
+                double timeRatio = Main.time / 54000.0;
+                if (Main.time < 27000.0)
+                {
+                    height += (float)Math.Pow(1.0 - timeRatio * 2.0, 2.0) * 250.0f;
+                }
+                else
+                {
+                    height += (float)Math.Pow((timeRatio - 0.5) * 2.0, 2.0) * 250.0f;
+                }
+            }
+
+            float maxTime = Main.dayTime ? 54000f : 32400f;
+            return new Vector2(Main.time / maxTime * (Main.screenWidth + 200f) - 100f, height + Main.sunModY);
+        }
+
+        public static Vector2 ToScreenCoords(Vector2 vec)
+        {
+            return vec * new Vector2(1f / Main.screenWidth, 1f / Main.screenHeight);
+        }
+    }
+}

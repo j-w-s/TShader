@@ -1,0 +1,457 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using ReLogic.Content;
+using Terraria;
+using Terraria.ID;
+using Terraria.GameContent.Drawing;
+using Terraria.Graphics.Effects;
+using Terraria.Graphics.Light;
+using Terraria.ModLoader;
+using Terraria.ModLoader.Config;
+
+namespace test 
+{
+    public class test : Mod 
+    {
+        // Original variables preserved
+        public static bool useLight = true;
+        public static bool useBloom = true;
+        public static float LightIntensity = 1f;
+        public static float ShadowIntensity = 1f;
+        public static float bloomIntensity = 1f;
+        public static float MoonLightIntensity;
+        public static bool fasttime = false;
+        public RenderTarget2D screen;
+        public RenderTarget2D light;
+        public RenderTarget2D bloom;
+        public RenderTarget2D cloud;
+        public static Effect Light;
+        public static Effect Shadow;
+        public static Effect Bloom;
+        public static int quality = 1;
+
+        // Cache frequently used values
+        private readonly Dictionary<int, float> moonPhaseIntensities;
+        private const float TIME_TO_DAYTIME_RATIO = 1f/54000f;
+        private const float TIME_TO_NIGHTTIME_RATIO = 1f/32400f;
+
+        public test()
+        {
+            moonPhaseIntensities = new Dictionary<int, float>
+            {
+                {0, 1.01f},  // Full moon
+                {3, 0.9f},   // Half moon
+                {4, 0.6f},   // New moon
+                {5, 0.9f}    // Half moon
+            };
+        }
+
+        public override void Load()
+        {
+            if (!Main.dedServ)
+            {
+                LoadShaderEffects();
+                On.Terraria.Graphics.Effects.FilterManager.EndCapture += FilterManager_EndCapture;
+                On.Terraria.Main.LoadWorlds += Main_LoadWorlds;
+                Main.OnResolutionChanged += Main_OnResolutionChanged;
+            }
+        }
+
+        private void LoadShaderEffects()
+        {
+            AssetRequestMode mode = (AssetRequestMode)2;
+            Light = ModContent.Request<Effect>("test/Effects/Light", mode).Value;
+            Shadow = ModContent.Request<Effect>("test/Effects/Shadow", mode).Value;
+            Bloom = ModContent.Request<Effect>("test/Effects/Bloom1", mode).Value;
+        }
+
+        public override void PostSetupContent()
+        {
+            if (!Main.dedServ)
+            {
+                LoadShaderEffects();
+            }
+        }
+
+        public override void Unload()
+        {
+            On.Terraria.Graphics.Effects.FilterManager.EndCapture -= FilterManager_EndCapture;
+            On.Terraria.Main.LoadWorlds -= Main_LoadWorlds;
+            Light = null;
+            Shadow = null;
+            Bloom = null;
+            screen = null;
+            light = null;
+            bloom = null;
+        }
+
+        private void Main_LoadWorlds(On.Terraria.Main.orig_LoadWorlds orig)
+        {
+            orig();
+            InitializeRenderTargets(Main.instance.GraphicsDevice);
+        }
+
+        private void Main_OnResolutionChanged(Vector2 obj)
+        {
+            InitializeRenderTargets(Main.instance.GraphicsDevice, true);
+        }
+
+        private void InitializeRenderTargets(GraphicsDevice gd, bool force = false)
+        {
+            if (screen == null || force)
+            {
+                int width = gd.PresentationParameters.BackBufferWidth;
+                int height = gd.PresentationParameters.BackBufferHeight;
+                CreateRenderTargets(gd, width, height);
+            }
+        }
+
+        private void CreateRenderTargets(GraphicsDevice gd, int width, int height)
+        {
+            var format = gd.PresentationParameters.BackBufferFormat;
+            var depthFormat = (DepthFormat)0;
+            
+            screen = new RenderTarget2D(gd, width / 3, height / 3, false, format, depthFormat);
+            light = new RenderTarget2D(gd, width, height, false, format, depthFormat);
+            bloom = new RenderTarget2D(gd, width / 3, height / 3, false, format, depthFormat);
+            cloud = new RenderTarget2D(gd, width / 3, height / 3, false, format, depthFormat);
+        }
+
+        private void FilterManager_EndCapture(On.Terraria.Graphics.Effects.FilterManager.orig_EndCapture orig, FilterManager self, RenderTarget2D finalTexture, RenderTarget2D screenTarget1, RenderTarget2D screenTarget2, Color clearColor)
+        {
+            GraphicsDevice gd = Main.instance.GraphicsDevice;
+            SpriteBatch sb = Main.spriteBatch;
+            if (Main.myPlayer >= 0)
+            {
+                InitializeRenderTargets(gd);
+                if (useBloom)
+                {
+                    UseBloom(gd);
+                }
+                if (useLight)
+                {
+                    UseLightAndShadow(gd, sb);
+                }
+            }
+            orig.Invoke(self, finalTexture, screenTarget1, screenTarget2, clearColor);
+        }
+
+        private void UseBloom(GraphicsDevice graphicsDevice)
+        {
+            graphicsDevice.SetRenderTarget(Main.screenTargetSwap);
+            graphicsDevice.Clear(Color.Transparent);
+            Main.spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend);
+            Main.spriteBatch.Draw(Main.screenTarget, Vector2.Zero, Color.White);
+            Main.spriteBatch.End();
+
+            ApplyInitialBloom(graphicsDevice);
+            ApplyBloomPasses(graphicsDevice);
+            RenderFinalBloom(graphicsDevice);
+        }
+
+        private void ApplyInitialBloom(GraphicsDevice graphicsDevice)
+        {
+            graphicsDevice.SetRenderTarget(screen);
+            graphicsDevice.Clear(Color.Transparent);
+            Main.spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend);
+            Bloom.CurrentTechnique.Passes[0].Apply();
+            Bloom.Parameters["m"].SetValue(0.68f - bloomIntensity * 0.02f);
+            Main.spriteBatch.Draw(Main.screenTarget, Vector2.Zero, null, Color.White, 0f, Vector2.Zero, 0.333f, SpriteEffects.None, 0f);
+            Main.spriteBatch.End();
+        }
+
+        private void ApplyBloomPasses(GraphicsDevice graphicsDevice)
+        {
+            Main.spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend);
+            Bloom.Parameters["uScreenResolution"].SetValue(new Vector2(Main.screenWidth / 3f, Main.screenHeight / 3f));
+            Bloom.Parameters["uRange"].SetValue(1f);
+            Bloom.Parameters["uIntensity"].SetValue(1.02f);
+
+            for (int i = 0; i < 4; i++)
+            {
+                ApplyBloomPass(graphicsDevice, true);  // Vertical
+                ApplyBloomPass(graphicsDevice, false); // Horizontal
+            }
+            Main.spriteBatch.End();
+        }
+
+        private void ApplyBloomPass(GraphicsDevice gd, bool vertical)
+        {
+            var target = vertical ? bloom : screen;
+            var source = vertical ? screen : bloom;
+            
+            gd.SetRenderTarget(target);
+            gd.Clear(Color.Transparent);
+            
+            Bloom.CurrentTechnique.Passes["GlurV"].Apply();
+            Main.spriteBatch.Draw(source, Vector2.Zero, null, Color.White);
+        }
+
+        private void RenderFinalBloom(GraphicsDevice gd)
+        {
+            gd.SetRenderTarget(Main.screenTarget);
+            gd.Clear(Color.Transparent);
+            
+            Main.spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Additive);
+            
+            Bloom.CurrentTechnique.Passes["Blend"].Apply();
+            Bloom.Parameters["tex0"].SetValue(Main.screenTargetSwap);
+            Bloom.Parameters["p"].SetValue(3);
+            Bloom.Parameters["m2"].SetValue(1.5f * bloomIntensity);
+            
+            Main.spriteBatch.Draw(screen, Vector2.Zero, null, Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 0f);
+            Main.spriteBatch.End();
+        }
+
+        private void UseLightAndShadow(GraphicsDevice gd, SpriteBatch sb)
+        {
+            PrepareScreenTarget(gd, sb);
+            ApplyLightPass(gd, sb);
+            ApplyShadowPass(gd, sb);
+            RenderFinalComposite(gd, sb);
+        }
+
+        private void PrepareScreenTarget(GraphicsDevice gd, SpriteBatch sb)
+        {
+            gd.SetRenderTarget(Main.screenTargetSwap);
+            gd.Clear(Color.Transparent);
+            sb.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend);
+            sb.Draw(Main.screenTarget, Vector2.Zero, Color.White);
+            sb.End();
+        }
+
+        private void ApplyLightPass(GraphicsDevice gd, SpriteBatch sb)
+        {
+            gd.SetRenderTarget(light);
+            gd.Clear(Color.Transparent);
+            sb.Begin(SpriteSortMode.Immediate, BlendState.NonPremultiplied);
+
+            Light.CurrentTechnique.Passes["Light"].Apply();
+            Light.Parameters["uScreenResolution"].SetValue(new Vector2(Main.screenWidth, Main.screenHeight));
+            Light.Parameters["uPos"].SetValue(ToScreenCoords(GetSunPos()));
+            Light.Parameters["tex0"].SetValue(ModContent.Request<Texture2D>("test/" + (Main.dayTime ? "ColorTex" : "ColorTex2"), (AssetRequestMode)2).Value);
+
+            float intensity = CalculateLightIntensity();
+            float finalIntensity = Main.dayTime ? intensity : GetMoonlightIntensity();
+            
+            Light.Parameters["intensity"].SetValue(finalIntensity);
+            Light.Parameters["t"].SetValue(Main.time / (Main.dayTime ? 54000f : 32400f));
+
+            if ((float)Main.LocalPlayer.Center.Y < Main.worldSurface * 16f + 800f)
+            {
+                sb.Draw(ModContent.Request<Texture2D>("test/PixelEX", (AssetRequestMode)2).Value, 
+                    new Rectangle(0, 0, Main.screenWidth, Main.screenHeight), Color.White);
+            }
+            sb.End();
+        }
+
+        private float CalculateLightIntensity()
+        {
+            Color skyColor = Main.ColorOfTheSkies;
+            float baseIntensity = 1f - 1.2f * (skyColor.R * 0.3f + skyColor.G * 0.6f + skyColor.B * 0.1f) / 255f;
+            
+            if (Main.LocalPlayer.ZoneSnow && !Main.LocalPlayer.ZoneCrimson && !Main.LocalPlayer.ZoneCorrupt)
+            {
+                baseIntensity -= Main.bgAlphaFrontLayer[7] * 0.1f;
+            }
+            if (Main.LocalPlayer.ZoneCrimson)
+            {
+                baseIntensity += 0.2f;
+            }
+            
+            ApplyBackgroundModifiers(ref baseIntensity);
+            
+            return 1.1f * LightIntensity * (0.75f + baseIntensity * 0.2f);
+        }
+
+        private void ApplyBackgroundModifiers(ref float intensity)
+        {
+            if (Main.snowBG[0] is 263 or 258 or 267)
+            {
+                intensity -= Main.bgAlphaFrontLayer[7];
+            }
+            if (Main.desertBG[0] == 248)
+            {
+                intensity -= Main.bgAlphaFrontLayer[2] * 0.6f;
+            }
+        }
+
+        private float GetMoonlightIntensity()
+        {
+            return moonPhaseIntensities.TryGetValue(Main.moonPhase, out float intensity) 
+                ? MoonLightIntensity * intensity 
+                : MoonLightIntensity;
+        }
+
+        private void ApplyShadowPass(GraphicsDevice gd, SpriteBatch sb)
+        {
+            gd.SetRenderTarget(screen);
+            gd.Clear(Color.Transparent);
+            
+            sb.Begin(SpriteSortMode.Immediate, BlendState.Additive);
+            Shadow.CurrentTechnique.Passes[0].Apply();
+            Shadow.Parameters["uScreenResolution"].SetValue(new Vector2(Main.screenWidth, Main.screenHeight));
+            
+            float desertI = Main.bgAlphaFrontLayer[2] * 0.1f;
+            if (Main.desertBG[0] == 248)
+            {
+                desertI = 0f;
+            }
+            
+            Shadow.Parameters["m"].SetValue(Main.dayTime ? 1f - desertI : 0.02f);
+            Shadow.Parameters["uPos"].SetValue(ToScreenCoords(GetSunPos()));
+            
+            sb.Draw(Main.screenTarget, Vector2.Zero, null, Color.White, 0f, Vector2.Zero, 0.333f, SpriteEffects.None, 0f);
+            sb.End();
+        }
+
+		private void RenderFinalComposite(GraphicsDevice gd, SpriteBatch sb)
+		{
+			gd.SetRenderTarget(Main.screenTarget);
+			gd.Clear(Color.Transparent);
+			
+			// Draw base layer
+			sb.Begin(SpriteSortMode.Immediate, BlendState.Additive);
+			DrawShadowLayers(sb);
+			sb.End();
+			
+			// Draw final composite
+			DrawFinalComposite(gd, sb);
+		}
+
+		private void DrawShadowLayers(SpriteBatch sb)
+		{
+			Vector2 sunPos = GetSunPos();
+			float finalIntens = CalculateLightIntensity();
+			
+			if (Main.dayTime)
+			{
+				DrawDaytimeShadows(sb, sunPos, finalIntens);
+			}
+			else
+			{
+				DrawNighttimeShadows(sb, sunPos);
+			}
+		}
+
+		private void DrawDaytimeShadows(SpriteBatch sb, Vector2 sunPos, float finalIntens)
+		{
+			for (int j = 0; j < quality * 10; j++)
+			{
+				float shaderIntens2 = CalculateShaderIntensity(j);
+				float a2 = (quality * 10 - j) / shaderIntens2;
+				float scale = 1f + j * (1f / quality) * (0.015f + quality * 0.01f);
+				
+				sb.Draw(screen, sunPos / 3f, null, 
+					Color.White * a2 * (ShadowIntensity + 0.2f) * (finalIntens * 0.9f - 0.1f),
+					0f, sunPos / 3f, scale, SpriteEffects.None, 0f);
+			}
+		}
+
+		private float CalculateShaderIntensity(int iteration)
+		{
+			float intensity = (quality * 18) * (1f + quality * 0.16f);
+			if (Main.snowBG[0] is 263 or 258 or 267)
+			{
+				intensity -= Main.bgAlphaFrontLayer[7] * 30f;
+			}
+			return intensity;
+		}
+
+		private void DrawNighttimeShadows(SpriteBatch sb, Vector2 sunPos)
+		{
+			const int NIGHT_SHADOW_ITERATIONS = 20;
+			const float NIGHT_SHADER_INTENSITY = 195f;
+			const float SCALE_INCREMENT = 0.015f;
+
+			for (int i = 0; i < NIGHT_SHADOW_ITERATIONS; i++)
+			{
+				float alpha = (NIGHT_SHADOW_ITERATIONS - i) / NIGHT_SHADER_INTENSITY;
+				float scale = 1f + i * SCALE_INCREMENT;
+				
+				sb.Draw(screen, sunPos / 3f, null, 
+					Color.White * alpha, 0f, sunPos / 3f, scale, 
+					SpriteEffects.None, 0f);
+			}
+		}
+
+		private void DrawFinalComposite(GraphicsDevice gd, SpriteBatch sb)
+		{
+			// Prepare intermediate screen buffer
+			gd.SetRenderTarget(screen);
+			gd.Clear(Color.Transparent);
+			sb.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend);
+			sb.Draw(Main.screenTarget, Vector2.Zero, null, Color.White);
+			sb.End();
+
+			// Render final composite
+			gd.SetRenderTarget(Main.screenTarget);
+			gd.Clear(Color.Transparent);
+			
+			// Draw base layer
+			sb.Begin(SpriteSortMode.Immediate, BlendState.Additive);
+			sb.Draw(Main.screenTargetSwap, Vector2.Zero, Color.White);
+			sb.End();
+			
+			// Apply final shadow pass
+			sb.Begin(SpriteSortMode.Immediate, BlendState.Additive);
+			Shadow.CurrentTechnique.Passes[1].Apply();
+			Shadow.Parameters["tex0"].SetValue(screen);
+			sb.Draw(light, Vector2.Zero, Color.White);
+			sb.End();
+		}
+
+		public static Vector2 ToScreenCoords(Vector2 vec)
+		{
+			return vec / new Vector2(Main.screenWidth, Main.screenHeight);
+		}
+
+		public Vector2 GetSunPos()
+		{
+			const float WORLD_SURFACE_OFFSET = 600.0f;
+			const float BACKGROUND_SCALE = 200.0f;
+			const float HEIGHT_OFFSET = 180.0f;
+			const float SCREEN_PADDING = 200f;
+			const float SCREEN_OFFSET = 100f;
+
+			float bgTop = (int)(-Main.screenPosition.Y / (Main.worldSurface * 16.0 - WORLD_SURFACE_OFFSET) * BACKGROUND_SCALE);
+			float height = CalculateSunHeight(bgTop);
+
+			float timeRatio = (float)Main.time / (Main.dayTime ? TIME_TO_DAYTIME_RATIO : TIME_TO_NIGHTTIME_RATIO);
+			float xPos = timeRatio * (Main.screenWidth + SCREEN_PADDING) - SCREEN_OFFSET;
+			
+			return new Vector2(xPos, height + Main.sunModY);
+		}
+
+		private float CalculateSunHeight(float bgTop)
+		{
+			const float MAX_HEIGHT = 250.0f;
+			const float HEIGHT_OFFSET = 180.0f;
+			const float MIDDAY_TIME = 27000.0;
+			const float DAY_LENGTH = 54000.0;
+
+			if (!Main.dayTime)
+				return bgTop;
+
+			double timeRatio = Main.time < MIDDAY_TIME 
+				? 1.0 - Main.time / DAY_LENGTH * 2.0
+				: (Main.time / DAY_LENGTH - 0.5) * 2.0;
+
+			return bgTop + (float)Math.Pow(timeRatio, 2.0) * MAX_HEIGHT + HEIGHT_OFFSET;
+		}
+
+		public static void SetQuality(int q)
+		{
+			if (quality != q)
+			{
+				quality = q;
+			}
+		}
+	}
+}

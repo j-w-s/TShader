@@ -1,0 +1,57 @@
+Mods: {
+	TShade: {
+		Items: {
+			asd: {
+				DisplayName: asd
+				Tooltip: ""
+			}
+		}
+
+		Configs: {
+			TShadeConfig: {
+				DisplayName: T Shade Config
+
+				Headers: {
+					GeneralSettings: General Settings Header
+					LightIntensities: Light Intensities Header
+					BloomEffects: Bloom Effects Header
+				}
+
+				UseLight: {
+					Label: Enable Lighting
+					Tooltip: ""
+				}
+
+				Quality: {
+					Label: Overall Quality
+					Tooltip: ""
+				}
+
+				LightIntensity: {
+					Label: General Light Intensity
+					Tooltip: ""
+				}
+
+				MoonLightIntensity: {
+					Label: Moon Light Intensity
+					Tooltip: ""
+				}
+
+				ShadowIntensity: {
+					Label: Shadow Intensity
+					Tooltip: ""
+				}
+
+				UseBloom: {
+					Label: Enable Bloom
+					Tooltip: ""
+				}
+
+				BloomIntensity: {
+					Label: Bloom Intensity
+					Tooltip: ""
+				}
+			}
+		}
+	}
+}

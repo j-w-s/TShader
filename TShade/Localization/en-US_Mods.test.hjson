@@ -1,0 +1,121 @@
+# This file will automatically update with entries for new content after a build and reload.
+
+Items: {
+	asd: {
+		DisplayName: asd
+		Tooltip:
+			'''
+			Template of an item
+			Replacing this tooltip is duty 
+			It's snowing on Mt.Fuji
+			'''
+	}
+}
+
+Configs: {
+	LightsConfig: {
+		DisplayName: Lights Config
+
+		UseLight: {
+			Label: Use Lights
+			Tooltip: ""
+		}
+
+		quality: {
+			Label: Quality
+			Tooltip: ""
+		}
+
+		lightIntensity: {
+			Label: Lights intensity
+			Tooltip: ""
+		}
+
+		moonlightIntensity: {
+			Label: Moon Light intensity
+			Tooltip: ""
+		}
+
+		shadowIntensity: {
+			Label: Shadow intensity
+			Tooltip: ""
+		}
+
+		UseBloom: {
+			Label: Use Bloom
+			Tooltip: ""
+		}
+
+		BloomIntensity: {
+			Label: Bloom Intensity
+			Tooltip: ""
+		}
+
+		Quality: {
+			Label: Overall Quality
+			Tooltip: ""
+		}
+
+		Headers: {
+			LightIntensities: Light Intensities Header
+			BloomEffects: Bloom Effects Header
+			VisualStyleParameters: Visual Style Parameters Header
+			AdvancedEffects: Advanced Effects Header
+		}
+
+		GeneralLightIntensity: {
+			Label: General Light Intensity
+			Tooltip: ""
+		}
+
+		MoonLightIntensity: {
+			Label: Moon Light Intensity
+			Tooltip: ""
+		}
+
+		ShadowIntensity: {
+			Label: Shadow Intensity
+			Tooltip: ""
+		}
+
+		EdgeStrength: {
+			Label: Edge Strength
+			Tooltip: ""
+		}
+
+		GlowRadius: {
+			Label: Glow Radius
+			Tooltip: ""
+		}
+
+		ColorSaturation: {
+			Label: Color Saturation
+			Tooltip: ""
+		}
+
+		AtmosphericDepth: {
+			Label: Atmospheric Depth
+			Tooltip: ""
+		}
+
+		TintColor: {
+			Label: Tint Color
+			Tooltip: ""
+		}
+
+		ParticleIntensity: {
+			Label: Particle Intensity
+			Tooltip: ""
+		}
+
+		WaterReflectionStrength: {
+			Label: Water Reflection Strength
+			Tooltip: ""
+		}
+
+		LightIntensity: {
+			Label: General Light Intensity
+			Tooltip: ""
+		}
+	}
+}
