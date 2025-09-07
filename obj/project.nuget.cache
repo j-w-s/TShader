@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "d6mrlv3i6jc=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Space\\OneDrive\\Documents\\My Games\\Terraria\\tModLoader\\ModSources\\TShader\\TShader.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Space\\.nuget\\packages\\microsoft.netcore.app.ref\\8.0.19\\microsoft.netcore.app.ref.8.0.19.nupkg.sha512",
+    "C:\\Users\\Space\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\8.0.19\\microsoft.windowsdesktop.app.ref.8.0.19.nupkg.sha512",
+    "C:\\Users\\Space\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\8.0.19\\microsoft.aspnetcore.app.ref.8.0.19.nupkg.sha512"
+  ],
+  "logs": []
+}

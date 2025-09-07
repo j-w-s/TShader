@@ -1,0 +1,9 @@
+This is a slight fork of the Lights and Shadows mod I worked on a few years back. While this version includes some enhancements, it is not intended to replace the original.  
+
+Enhancements:  
+- Optimized and modularized code for better performance and usability. 
+- Open-source. 
+- Upgraded visual effects (stylized).  
+
+Feel free to modify the .fx and texture files as you see fit.
+NOTE: An XNB compiler is required to update effects.
