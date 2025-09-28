@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("TShader")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+479a030bff2c99858d123dbabb55c4fe736e9921")]
 [assembly: System.Reflection.AssemblyProductAttribute("TShader")]
 [assembly: System.Reflection.AssemblyTitleAttribute("TShader")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
